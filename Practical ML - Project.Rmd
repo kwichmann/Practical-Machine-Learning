@@ -1,0 +1,105 @@
+---
+title: "Practical ML - project"
+author: "Kristian Wichmann"
+date: "14. feb. 2016"
+output: html_document
+---
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Libraries
+```{r, message=FALSE}
+library(caret)
+library(rpart)
+library(randomForest)
+```
+
+## The data
+
+Load the training and test sets.
+```{r}
+if (!file.exists("training.csv")) {
+  download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",
+                destfile = "training.csv",
+                method = "curl")
+}
+
+if (!file.exists("test.csv")) {
+  download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",
+                destfile = "test.csv",
+                method = "libcurl")
+}
+
+training_full <- read.csv("training.csv")
+test <- read.csv("test.csv")
+```
+
+## The machine learning problem
+
+We wish to predict the 'classe' variable. It represents the five ways to perform the barbell lifts.
+```{r}
+unique(training_full$classe)
+```
+So this is a multi-classification problem.
+
+## Cross-validation set
+
+A cross-validation subset of the training set is picked at random. For reproducibility, a seed is set:
+```{r}
+set.seed(6060)
+in_train <- createDataPartition(y=training_full$classe, p=0.7, list=FALSE)
+training <- training_full[in_train,]
+cv <- training_full[-in_train,]
+```
+
+## Pre-processing: Choosing predictors
+
+The first seven variables are names, times etc. and thus not suitable to use for classification prediction. Lots of the other variables contain little data. These are inspected and picked out by hand. And of course, the 'classe' (which we're trying to predict) should be included as well:  
+```{r}
+training <- training[,c(8:11, 37:49, 60:68, 84:86, 102, 113:124, 140, 151:160)]
+cv <- cv[,c(8:11, 37:49, 60:68, 84:86, 102, 113:124, 140, 151:160)]
+test <- test[,c(8:11, 37:49, 60:68, 84:86, 102, 113:124, 140, 151:160)]
+```
+
+Let's check if there's any of the non-classe predictors that are highly correlated:
+```{r}
+c <- abs(cor(training[,-53]))
+diag(c) <- 0
+which(c>0.95, arr.ind=T)
+```
+
+That's quite a few, highly correlated predictors. Let's remove the ones that are basically just copies of the other:
+```{r}
+training <- training[,-c(4, 8, 10, 31)]
+cv <- cv[,-c(4, 8, 10, 31)]
+test <- test[,-c(4, 8, 10, 31)]
+```
+
+## Models
+
+A number of models might be appropriate for multi-classification problems. One is a tree model. Let's fit a model and see how it performs on the cross-validation set:
+```{r}
+model1 <- train(classe ~ ., method="rpart", data=training)
+pred1 <- predict(model1, newdata = cv)
+cm1 <- confusionMatrix(pred1, reference = cv$classe)
+cm1$table
+cm1$overall[1]
+```
+
+Not too impressive. Let's try a random forest model instead. In order to make the algorithm run in a reasonable amount of time the number of trees is set to 50 and the number of bootstrap cross-validations to 3:
+
+```{r}
+model2 <- train(classe ~ ., method="rf", trControl=trainControl(method="cv", 3), data=training, ntree=50)
+pred2 <- predict(model2, newdata = cv)
+cm2 <- confusionMatrix(pred2, reference = cv$classe)
+cm2$table
+cm2$overall[1]
+```
+This is a very high level of accuracy, so we'll use this model.
+
+## Predictions for the test set
+
+Now let's apply the model to the test set:
+```{r}
+predict(model2, newdata = test)
+```
+These are all correct according to the quiz.
